@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Signing Page</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .upload-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .upload-section h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .signature-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .signature-section h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        #signature-pad {
+            width: 100%;
+            max-width: 600px;
+            height: 200px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin: 0 auto 15px;
+            display: block;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.3s;
+            color: white;
+        }
+
+        .button.save {
+            background-color: #4CAF50;
+        }
+
+        .button.save:hover {
+            background-color: #45a049;
+        }
+
+        .button.clear {
+            background-color: #f44336;
+        }
+
+        .button.clear:hover {
+            background-color: #d32f2f;
+        }
+
+        .button.download {
+            background-color: #2196F3;
+        }
+
+        .button.download:hover {
+            background-color: #1976D2;
+        }
+
+        .document-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            min-height: 500px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #pdf-viewer {
+            width: 100%;
+            min-height: 500px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .document-image {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        .signature-preview {
+            position: absolute;
+            cursor: move;
+            z-index: 1000;
+            background: transparent;
+            border: 1px dashed #ccc;
+            padding: 5px;
+            max-width: 200px;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .error-message {
+            color: #f44336;
+            margin-top: 10px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="upload-section">
+            <h2>Upload Document</h2>
+            <input type="file" id="document-upload" accept="image/*,.pdf">
+            <div class="error-message" id="upload-error"></div>
+        </div>
+
+        <div class="signature-section">
+            <h2>Draw Signature</h2>
+            <canvas id="signature-pad"></canvas>
+            <div class="controls">
+                <button class="button save" id="save-signature">Save Signature</button>
+                <button class="button clear" id="clear-signature">Clear</button>
+            </div>
+        </div>
+
+        <div class="document-container" id="document-area">
+            <div id="pdf-viewer"></div>
+        </div>
+
+        <div class="controls">
+            <button class="button download" id="download-doc">Download Signed Document</button>
+        </div>
+    </div>
+
+    <div class="loading">
+        <div class="loading-content">
+            Processing document...
+        </div>
+    </div>
+
+    <script>
+        class SignaturePad {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.isDrawing = false;
+                this.points = [];
+                
+                // Set canvas size
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+
+                // Initialize drawing settings
+                this.ctx.strokeStyle = '#000000';
+                this.ctx.lineWidth = 2;
+                this.ctx.lineCap = 'round';
+                this.ctx.lineJoin = 'round';
+
+                this.setupEventListeners();
+            }
+
+            resizeCanvas() {
+                this.canvas.width = this.canvas.offsetWidth;
+                this.canvas.height = this.canvas.offsetHeight;
+            }
+
+            setupEventListeners() {
+                // Mouse events
+                this.canvas.addEventListener('mousedown', (e) => this.startDrawing(e));
+                this.canvas.addEventListener('mousemove', (e) => this.draw(e));
+                this.canvas.addEventListener('mouseup', () => this.stopDrawing());
+                this.canvas.addEventListener('mouseout', () => this.stopDrawing());
+
+                // Touch events
+                this.canvas.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    this.startDrawing(touch);
+                });
+
+                this.canvas.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    this.draw(touch);
+                });
+
+                this.canvas.addEventListener('touchend', () => this.stopDrawing());
+            }
+
+            startDrawing(e) {
+                this.isDrawing = true;
+                this.points = [];
+                const rect = this.canvas.getBoundingClientRect();
+                const x = (e.clientX || e.pageX) - rect.left;
+                const y = (e.clientY || e.pageY) - rect.top;
+                this.points.push({ x, y });
+                this.ctx.beginPath();
+                this.ctx.moveTo(x, y);
+            }
+
+            draw(e) {
+                if (!this.isDrawing) return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const x = (e.clientX || e.pageX) - rect.left;
+                const y = (e.clientY || e.pageY) - rect.top;
+                this.points.push({ x, y });
+
+                // Clear canvas and redraw all points
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.points[0].x, this.points[0].y);
+
+                for (let i = 1; i < this.points.length; i++) {
+                    const xc = (this.points[i].x + this.points[i - 1].x) / 2;
+                    const yc = (this.points[i].y + this.points[i - 1].y) / 2;
+                    this.ctx.quadraticCurveTo(this.points[i - 1].x, this.points[i - 1].y, xc, yc);
+                }
+
+                this.ctx.stroke();
+            }
+
+            stopDrawing() {
+                this.isDrawing = false;
+            }
+
+            clear() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.points = [];
+            }
+
+            isEmpty() {
+                return this.points.length === 0;
+            }
+
+            getSignatureImage() {
+                return this.canvas.toDataURL('image/png');
+            }
+        }
+
+        function makeDraggable(element) {
+            let isDragging = false;
+            let currentX;
+            let currentY;
+            let initialX;
+            let initialY;
+            let xOffset = 0;
+            let yOffset = 0;
+
+            element.addEventListener('mousedown', dragStart);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', dragEnd);
+
+            element.addEventListener('touchstart', dragStart, { passive: false });
+            document.addEventListener('touchmove', drag, { passive: false });
+            document.addEventListener('touchend', dragEnd);
+
+            function dragStart(e) {
+                if (e.type === 'mousedown') {
+                    initialX = e.clientX - xOffset;
+                    initialY = e.clientY - yOffset;
+                } else {
+                    initialX = e.touches[0].clientX - xOffset;
+                    initialY = e.touches[0].clientY - yOffset;
+                }
+
+                if (e.target === element) {
+                    isDragging = true;
+                    e.preventDefault();
+                }
+            }
+
+            function drag(e) {
+                if (isDragging) {
+                    e.preventDefault();
+
+                    if (e.type === 'mousemove') {
+                        currentX = e.clientX - initialX;
+                        currentY = e.clientY - initialY;
+                    } else {
+                        currentX = e.touches[0].clientX - initialX;
+                        currentY = e.touches[0].clientY - initialY;
+                    }
+
+                    xOffset = currentX;
+                    yOffset = currentY;
+
+                    const container = document.querySelector('.document-container');
+                    const rect = container.getBoundingClientRect();
+
+                    // Constrain movement within container bounds
+                    const maxX = rect.width - element.offsetWidth;
+                    const maxY = rect.height - element.offsetHeight;
+
+                    currentX = Math.min(Math.max(0, currentX), maxX);
+                    currentY = Math.min(Math.max(0, currentY), maxY);
+
+                    setTranslate(currentX, currentY, element);
+                }
+            }
+
+            function dragEnd() {
+                initialX = currentX;
+                initialY = currentY;
+                isDragging = false;
+            }
+
+            function setTranslate(xPos, yPos, el) {
+                el.style.transform = `translate(${xPos}px, ${yPos}px)`;
+            }
+        }
+
+        // Initialize signature pad
+        const signaturePad = new SignaturePad(document.getElementById('signature-pad'));
+        const loading = document.querySelector('.loading');
+
+        // Clear signature button
+        document.getElementById('clear-signature').addEventListener('click', () => {
+            signaturePad.clear();
+        });
+
+        // Save signature button
+        document.getElementById('save-signature').addEventListener('click', () => {
+            if (signaturePad.isEmpty()) {
+                alert('Please draw a signature first.');
+                return;
+            }
+
+            const signatureImage = signaturePad.getSignatureImage();
+            
+            // Create new image element
+            const img = document.createElement('img');
+            img.src = signatureImage;
+            img.className = 'signature-preview';
+            
+            // Remove existing signature if any
+            const existingSignature = document.querySelector('.signature-preview');
+            if (existingSignature) {
+                existingSignature.remove();
+            }
+
+            // Add new signature to document area
+            const documentArea = document.getElementById('pdf-viewer');
+            documentArea.appendChild(img);
+            
+            // Initialize draggable
+            makeDraggable(img);
+        });
+
+        // Handle document upload
+        document.getElementById('document-upload').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const pdfViewer = document.getElementById('pdf-viewer');
+            pdfViewer.innerHTML = ''; // Clear existing content
+
+            try {
+                if (file.type.includes('image')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = document.createElement('img');
+                        img.src = e.target.result;
+                        img.className = 'document-image';
+                        pdfViewer.appendChild(img);
+                    };
+                    reader.readAsDataURL(file);
+                } else if (file.type === 'application/pdf') {
+                    // Load PDF using PDF.js
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    
+                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                        const page = await pdf.getPage(pageNum);
+                        const scale = 1.5;
+                        const viewport = page.getViewport({ scale });
+
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+
+                        await page.render({
+                            canvasContext: context,
+                            viewport: viewport
+                        }).promise;
+
+                        pdfViewer.appendChild(canvas);
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading document:', error);
+                pdfViewer.innerHTML = '<div class="error-message">Error loading document. Please try again.</div>';
+            }
+        });
+
+        // Download functionality
+        document.getElementById('download-doc').addEventListener('click', async () => {
+            const documentArea = document.getElementById('document-area');
+            const signature = document.querySelector('.signature-preview');
+            
+            if (!signature) {
+                alert('Please add a signature before downloading.');
+                return;
+            }
+
+            loading.style.display = 'flex';
+
+            try {
+                // Capture the document area with html2canvas
+                const canvas = await html2canvas(documentArea, {
+                    scale: 2, // Higher quality
+                    useCORS: true,
+                    logging: false,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff'
+                });
+
+                // Convert to PDF
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: 'p',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+
+                // Add the image to the PDF
+                const imgData = canvas.toDataURL('image/png');
+                const imgProps = pdf.getImageProperties(imgData);
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                
+                // Save the PDF
+                pdf.save('signed-document.pdf');
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                alert('Error generating PDF. Please try again.');
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Handle window resize for responsive canvas
+        window.addEventListener('resize', () => {
+            const canvas = document.getElementById('signature-pad');
+            const ctx = canvas.getContext('2d');
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Save current drawing
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            tempCtx.drawImage(canvas, 0, 0);
+            
+            // Resize canvas
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            
+            // Restore drawing
+            ctx.drawImage(tempCanvas, 0, 0);
+        });
+
+        // Prevent default drag behaviors
+        document.addEventListener('dragover', (e) => e.preventDefault());
+        document.addEventListener('drop', (e) => e.preventDefault());
+    </script>
+</body>
+</html>
